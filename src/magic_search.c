@@ -15,8 +15,13 @@ static uint64_t randomU64(PCG32* rng) {
     return (uint64_t) pcg32Next(rng) << 32 | (uint64_t) pcg32Next(rng);
 }
 
-static uint64_t randomMagic(PCG32* rng) {
-    return randomU64(rng) & randomU64(rng) & randomU64(rng);
+static uint64_t randomMagic(PCG32* rng, uint32_t sparseness) {
+    switch (sparseness) {
+        case 1: return randomU64(rng);
+        case 2: return randomU64(rng) & randomU64(rng);
+        case 3: return randomU64(rng) & randomU64(rng) & randomU64(rng);
+        default: return randomU64(rng) & randomU64(rng) & randomU64(rng) & randomU64(rng);
+    }
 }
 
 void initAttackSubsets() {
@@ -62,63 +67,52 @@ void initAttackSubsets() {
     }
 }
 
-uint64_t findBishopMagic(uint32_t square, PCG32* rng, uint32_t* minBits, uint32_t* arrSize) {
-    PCG32* newRng = createPCG32();
-    newRng->state = rng->state;
-    newRng->inc = rng->inc;
+uint64_t findBishopMagic(uint32_t square, PCG32* rng, uint32_t* arrSize, uint32_t* unusedBits, uint32_t bitsOffset) {
     uint64_t table[512] = {};
     uint32_t bits = bishopRelevantBits[square];
     uint32_t size = (1u << bits);
-    uint64_t lastGoodMagic = 0;
-    int32_t failed = 0;
-    *arrSize = 10000000;
-    while (!failed) {
-        failed = 1;
-        for (uint32_t try = 0; try < 10; try += 1) {
-            uint64_t magic = randomMagic(newRng);
-            if (popcount64((magic * (bocc[square * 512 + size - 1] | 1)) & 0xFF00000000000000ull) < 6) continue;
-            uint32_t maxIdx = 0;
-            int32_t good = 1;
-            for (uint32_t i = 0; i < size; i += 1) table[i] = 0;
-            for (uint32_t i = 0; i < size; i += 1) {
-                uint32_t index = (uint32_t) ((magic * bocc[square * 512 + i]) >> (64 - bits));
-                if (index > maxIdx) maxIdx = index;
-                if (table[index] == batt[square * 512 + i]) continue;
-                if (table[index]) {
-                    good = 0;
-                    break;
-                }
-                table[index] = batt[square * 512 + i];
-            }
-            if (good && *arrSize > maxIdx + 1) {
-                lastGoodMagic = magic;
-                *minBits = bits;
-                *arrSize = maxIdx + 1;
-                failed = 0;
+    uint32_t sparseness = (bits >= 8) ? 2 : 3;
+    for (;;) {
+        uint64_t magic = randomMagic(rng, sparseness);
+        // magic = 0xfc0962854a77f576ull;
+        uint32_t maxIdx = 0;
+        uint32_t unused = 0b111111111 >> (9 - bits);
+        int32_t good = 1;
+        for (uint32_t i = 0; i < size; i += 1) table[i] = 0;
+        for (uint32_t i = 0; i < size; i += 1) {
+            uint32_t index = (uint32_t) ((magic * bocc[square * 512 + i]) >> (64 - bits + bitsOffset));
+            unused &= ~index;
+            if (index > maxIdx) maxIdx = index;
+            if (table[index] == batt[square * 512 + i]) continue;
+            if (table[index]) {
+                good = 0;
                 break;
             }
+            table[index] = batt[square * 512 + i];
         }
-        if (failed && size == (1u << bits)) {
-            failed = 0;
-        } else {
-            bits -= 1;
+        if (good) {
+            *arrSize = maxIdx + 1;
+            *unusedBits = popcount64(unused);
+            return magic;
         }
     }
-    destroyPCG32(newRng);
-    return lastGoodMagic;
 }
 
-uint64_t findRookMagic(uint32_t square, PCG32* rng) {
+uint64_t findRookMagic(uint32_t square, PCG32* rng, uint32_t* arrSize, uint32_t* unusedBits) {
     uint64_t table[4096] = {};
     uint32_t bits = rookRelevantBits[square];
     uint32_t size = (1u << bits);
+    uint32_t sparseness = (bits >= 12) ? 2 : 3;
     for (;;) {
-        uint64_t magic = randomMagic(rng);
-        if (popcount64((magic * (rocc[square * 4096 + size - 1] | 1)) & 0xFF00000000000000ull) < 6) continue;
+        uint64_t magic = randomMagic(rng, sparseness);
+        uint32_t maxIdx = 0;
+        uint32_t unused = 0b111111111 >> (12 - bits);
         int32_t good = 1;
         for (uint32_t i = 0; i < size; i += 1) table[i] = 0;
         for (uint32_t i = 0; i < size; i += 1) {
             uint32_t index = (uint32_t) ((magic * rocc[square * 4096 + i]) >> (64 - bits));
+            unused &= ~index;
+            if (index > maxIdx) maxIdx = index;
             if (table[index] == ratt[square * 4096 + i]) continue;
             if (table[index]) {
                 good = 0;
@@ -126,31 +120,30 @@ uint64_t findRookMagic(uint32_t square, PCG32* rng) {
             }
             table[index] = ratt[square * 4096 + i];
         }
-        if (good) return magic;
+        if (good) {
+            *arrSize = maxIdx + 1;
+            *unusedBits = popcount64(unused);
+            return magic;
+        }
     }
 }
 
-void bishopMagicSearch(uint64_t magics[64], uint32_t bits[64], PCG32* rng, uint32_t* totalSize) {
+void bishopMagicSearch(uint64_t magics[64], PCG32* rng, uint32_t* totalSize) {
     *totalSize = 0;
     uint32_t size;
     for (uint32_t i = 0; i < 64; i += 1) {
-        magics[i] = findBishopMagic(i, rng, bits + i, &size);
+        magics[i] = findBishopMagic(i, rng, &size, NULL, 0);
         *totalSize += size;
-        randomMagic(rng);
+        randomMagic(rng, 2);
     }
 }
 
-void rookMagicSearch() {
-    PCG32* rng = createPCG32();
-    pcg32Seed(rng, pcgHash(7838234), pcgHash(91247124));
-
-    printf("Rook magic search:\n{");
-    uint32_t totalSize = 0;
-    for (uint32_t i = 0; i < 64; i++) {
-        printf("0x%llxull, ", findRookMagic(i, rng));
-        totalSize += (uint32_t) (1ull << rookRelevantBits[i]);
+void rookMagicSearch(uint64_t magics[64], PCG32* rng, uint32_t* totalSize) {
+    *totalSize = 0;
+    uint32_t size;
+    for (uint32_t i = 0; i < 64; i += 1) {
+        magics[i] = findRookMagic(i, rng, &size, NULL);
+        *totalSize += size;
+        randomMagic(rng, 2);
     }
-    printf("};\nTotal size: %u\n\n", totalSize);
-
-    destroyPCG32(rng);
 }
