@@ -67,7 +67,7 @@ void initAttackSubsets() {
     }
 }
 
-uint64_t findBishopMagic(uint32_t square, PCG32* rng, uint32_t* arrSize, uint32_t* unusedBits, uint32_t bitsOffset) {
+uint64_t findBishopMagic(uint32_t square, PCG32* rng, uint32_t* arrSize, uint32_t* unusedBits) {
     uint64_t table[512] = {};
     uint32_t bits = bishopRelevantBits[square];
     uint32_t size = (1u << bits);
@@ -80,7 +80,7 @@ uint64_t findBishopMagic(uint32_t square, PCG32* rng, uint32_t* arrSize, uint32_
         int32_t good = 1;
         for (uint32_t i = 0; i < size; i += 1) table[i] = 0;
         for (uint32_t i = 0; i < size; i += 1) {
-            uint32_t index = (uint32_t) ((magic * bocc[square * 512 + i]) >> (64 - bits + bitsOffset));
+            uint32_t index = (uint32_t) ((magic * bocc[square * 512 + i]) >> (64 - bits));
             unused &= ~index;
             if (index > maxIdx) maxIdx = index;
             if (table[index] == batt[square * 512 + i]) continue;
@@ -132,7 +132,7 @@ void bishopMagicSearch(uint64_t magics[64], PCG32* rng, uint32_t* totalSize) {
     *totalSize = 0;
     uint32_t size;
     for (uint32_t i = 0; i < 64; i += 1) {
-        magics[i] = findBishopMagic(i, rng, &size, NULL, 0);
+        magics[i] = findBishopMagic(i, rng, &size, NULL);
         *totalSize += size;
         randomMagic(rng, 2);
     }

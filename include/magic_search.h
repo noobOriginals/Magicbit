@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 void initAttackSubsets();
-uint64_t findBishopMagic(uint32_t square, PCG32* rng, uint32_t* arrSize, uint32_t* unusedBits, uint32_t bitsOffset);
+uint64_t findBishopMagic(uint32_t square, PCG32* rng, uint32_t* arrSize, uint32_t* unusedBits);
 uint64_t findRookMagic(uint32_t square, PCG32* rng, uint32_t* arrSize, uint32_t* unusedBits);
 void bishopMagicSearch(uint64_t magics[64], PCG32* rng, uint32_t* totalSize);
 void rookMagicSearch(uint64_t magics[64], PCG32* rng, uint32_t* totalSize);

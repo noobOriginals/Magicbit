@@ -5,6 +5,8 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
+#include <queue>
+#include <string>
 
 #include "attacks.h"
 #include "magic_search.h"
@@ -160,14 +162,39 @@ void printMagics(const uint64_t magics[64], const uint32_t bits[64], const uint3
     }
 }
 
+void fprintMagics(FILE* file, const uint64_t magics[64], const uint32_t bits[64], const uint32_t totalSize, const bool rook) {
+    if (rook) {
+        fprintf(file, "Rook magic search:\n{");
+    } else {
+        fprintf(file, "Bishop magic search:\n{");
+    }
+    for (uint32_t i = 0; i < 63; i++) {
+        fprintf(file, "0x%llxull, ", magics[i]);
+    }
+    fprintf(file, "0x%llxull", magics[63]);
+    if (bits) {
+        fprintf(file, "};\n{");
+        uint32_t totalBits = 0;
+        for (uint32_t i = 0; i < 63; i++) {
+            fprintf(file, "%u, ", bits[i]);
+            totalBits += bits[i];
+        }
+        fprintf(file, "%u", bits[63]);
+        totalBits += bits[63];
+        fprintf(file, "};\nTotal size: %u\nTotal bits: %u\n\n", totalSize, totalBits);
+    } else {
+        fprintf(file, "};\nTotal size: %u\n\n", totalSize);
+    }
+}
+
 uint64_t tryBishopSquare(uint32_t square, uint32_t* size, uint32_t* bits) {
     PCG32* rng = createPCG32();
     pcg32Seed(rng, pcgHash(time(NULL)), pcgHash(time(NULL) & 0x204042000009680ull));
     uint32_t totalSize, bestSize, unused;
     uint64_t magic, bestMagic;
-    bestMagic = findBishopMagic(square, rng, &bestSize, &unused, 0);
+    bestMagic = findBishopMagic(square, rng, &bestSize, &unused);
     for (uint32_t i = 0; i < 1000; i++) {
-        magic = findBishopMagic(square, rng, &totalSize, &unused, 0);
+        magic = findBishopMagic(square, rng, &totalSize, &unused);
         if (totalSize < bestSize) {
             bestSize = totalSize;
             bestMagic = magic;
@@ -244,19 +271,92 @@ void findMagicsMultithread(bool rook) {
     printMagics(magics, bits, totalSize, rook);
 }
 
+uint32_t searchBestSize(uint64_t* finalMagic, uint32_t square, bool rook, uint32_t timeLimitMillis, uint32_t runIdx) {
+    std::atomic<uint32_t> bestSize(5000);
+    std::atomic<uint64_t> bestMagic(0);
+    std::atomic<uint32_t> workerIdx(0);
+    std::atomic<bool> done(false);
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+    auto monitor = [&]() {
+        while (!done) {
+            std::chrono::duration<double, std::milli> elapsed = std::chrono::high_resolution_clock::now() - startTime;
+            if (elapsed.count() > timeLimitMillis) done.store(true);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    };
+    std::thread monitorThread(monitor);
+
+    auto worker = [&]() {
+        PCG32* rng = createPCG32();
+        pcg32Seed(rng, pcgHash(0x445020000404cull + workerIdx++), pcgHash(square * runIdx));
+        uint32_t totalSize, unused;
+        uint64_t magic;
+        while (true) {
+            magic = rook ? findRookMagic(square, rng, &totalSize, &unused) : findBishopMagic(square, rng, &totalSize, &unused);
+            if (totalSize < bestSize) {
+                bestSize.store(totalSize);
+                bestMagic.store(magic);
+                printf("0x%llxull - Size: %u - Unused bits: %u\n", magic, bestSize.load(), unused);
+            }
+            if (unused >= 1 || done) {
+                done.store(true);
+                destroyPCG32(rng);
+                return;
+            }
+        }
+    };
+
+    std::vector<std::thread> threads;
+    for (uint32_t i = 0; i < std::thread::hardware_concurrency(); i++) threads.emplace_back(worker);
+    for (auto& t : threads) t.join();
+    monitorThread.join();
+    *finalMagic = bestMagic.load();
+    return bestSize.load();
+}
+
+void searchBestSizeTableMagics(bool rook, uint32_t timelimit, FILE* file, uint32_t runIdx) {
+    uint64_t magics[64] = {};
+    uint32_t totalSize = 0;
+    for (uint32_t sq = 0; sq < 64; sq++) {
+        printf("\nSquare %u\n", sq);
+        totalSize += searchBestSize(&magics[sq], sq, rook, timelimit, runIdx);
+    }
+    printMagics(magics, NULL, totalSize, rook);
+    fprintMagics(file, magics, NULL, totalSize, rook);
+}
+
 int main() {
     initAttackTables();
     initAttackSubsets();
 
-    uint32_t square = 1;
+    uint32_t timelimit = 60000;
 
-    PCG32* rng = createPCG32();
-    pcg32Seed(rng, pcgHash(0x445020000404cull), pcgHash(square));
-    uint32_t totalSize, unused;
-    uint64_t magic;
-    magic = findBishopMagic(square, rng, &totalSize, &unused, 1);
-    printf("0x%llxull — Size: %u — Unused bits: %u\n", magic, totalSize, unused);
-    destroyPCG32(rng);
+    for (uint32_t runIdx = 3; timelimit > 0; timelimit /= 2, runIdx++) {
+        FILE* file = fopen(("search_runs/run" + std::to_string(runIdx) + ".txt").c_str(), "w");
+        searchBestSizeTableMagics(false, timelimit, file, runIdx);
+        searchBestSizeTableMagics(true, timelimit, file, runIdx);
+        fclose(file);
+    }
+
+    // PCG32* rng = createPCG32();
+    // pcg32Seed(rng, pcgHash(0x445020000404cull), pcgHash(square));
+    // uint32_t totalSize, bestSize, unused;
+    // uint64_t magic;
+    // magic = findBishopMagic(square, rng, &bestSize, &unused, 0);
+    // printf("0x%llxull - Size: %u - Unused bits: %u\n", magic, bestSize, unused);
+    // while (true) {
+    //     magic = findBishopMagic(square, rng, &totalSize, &unused, 0);
+    //     if (totalSize < bestSize) {
+    //         bestSize = totalSize;
+    //         printf("0x%llxull - Size: %u - Unused bits: %u\n", magic, bestSize, unused);
+    //     }
+    //     if (unused >= 1) {
+    //         break;
+    //     }
+    // }
+    // printf("0x%llxull - Size: %u - Unused bits: %u\n", magic, totalSize, unused);
+    // destroyPCG32(rng);
 
     // auto startTime = std::chrono::high_resolution_clock::now();
     // bishopMagicSearch(magics, rng, &bestSize);
