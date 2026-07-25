@@ -332,7 +332,7 @@ int main() {
 
     uint32_t timelimit = 60000;
 
-    for (uint32_t runIdx = 3; timelimit > 0; timelimit /= 2, runIdx++) {
+    for (uint32_t runIdx = 3; timelimit >= 2000; timelimit /= 2, runIdx++) {
         FILE* file = fopen(("search_runs/run" + std::to_string(runIdx) + ".txt").c_str(), "w");
         searchBestSizeTableMagics(false, timelimit, file, runIdx);
         searchBestSizeTableMagics(true, timelimit, file, runIdx);

@@ -73,7 +73,7 @@ uint64_t findBishopMagic(uint32_t square, PCG32* rng, uint32_t* arrSize, uint32_
     uint32_t size = (1u << bits);
     uint32_t sparseness = (bits >= 8) ? 2 : 3;
     for (;;) {
-        uint64_t magic = randomMagic(rng, sparseness);
+        uint64_t magic = randomMagic(rng, 3);
         // magic = 0xfc0962854a77f576ull;
         uint32_t maxIdx = 0;
         uint32_t unused = 0b111111111 >> (9 - bits);
@@ -104,7 +104,7 @@ uint64_t findRookMagic(uint32_t square, PCG32* rng, uint32_t* arrSize, uint32_t*
     uint32_t size = (1u << bits);
     uint32_t sparseness = (bits >= 12) ? 2 : 3;
     for (;;) {
-        uint64_t magic = randomMagic(rng, sparseness);
+        uint64_t magic = randomMagic(rng, 3);
         uint32_t maxIdx = 0;
         uint32_t unused = 0b111111111 >> (12 - bits);
         int32_t good = 1;
