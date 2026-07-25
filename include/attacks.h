@@ -33,8 +33,8 @@ extern uint32_t bishopRelevantBits[64];
 extern uint32_t rookRelevantBits[64];
 
 // Magic bitboards' attack tables
-extern uint64_t bishopAttacks[5248], * bishopTablePointers[64];
-extern uint64_t rookAttacks[102400], * rookTablePointers[64];
+extern uint64_t bishopAttacks[5009], * bishopTablePointers[64];
+extern uint64_t rookAttacks[102359], * rookTablePointers[64];
 
 // Initialize attack tables
 uint64_t getBishopAttacksSlow(uint32_t square, uint64_t occupancy); // Slow version
